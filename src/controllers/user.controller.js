@@ -1,9 +1,136 @@
+import { apiError } from '../utils/apiError.js';
+import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { User } from '../models/user.model.js';
+import uploadOnCloudinary from '../utils/cloudinary.js';
+
+function validateEmail(email) {
+    if (!email) return false;
+
+    const parts = email.split('@');
+
+    if (parts.length !== 2) return false;
+
+    const localPart = parts[0];
+    const domainPart = parts[1];
+
+    if (!localPart || !domainPart) return false;
+
+    // at least one '.' in the domain part
+    if (domainPart.indexOf('.') === -1) return false;
+
+    // the last '.' in the domain part is not the last character
+    if (domainPart.lastIndexOf('.') === domainPart.length - 1) return false;
+
+    return true;
+}
+
+function validatePassword(password) {
+    if (password.length < 8) return 'Length of password should be at least 8.';
+
+    let hasUppercase = false;
+    let hasLowercase = false;
+    let hasDigit = false;
+    let hasSpecialChar = false;
+
+    for (let i = 0; i < password.length; i++) {
+        const char = password[i];
+
+        if (char >= 'A' && char <= 'Z') hasUppercase = true;
+        else if (char >= 'a' && char <= 'z') hasLowercase = true;
+        else if (char >= '0' && char <= '9') hasDigit = true;
+        else hasSpecialChar = true;
+    }
+
+    if (!hasUppercase)
+        return 'Password should contain at least one uppercase letter';
+    if (!hasLowercase)
+        return 'Password should contain at least one lowercase letter';
+    if (!hasSpecialChar)
+        return 'Password should contain at least one special character';
+    if (!hasDigit) return 'Password should contain at least one digit';
+
+    return '';
+}
 
 const registerUser = asyncHandler(async (req, res) => {
-    res.status(200).json({
-        message: 'ok',
+    // get user details from frontend
+    const { fullName, email, username, password } = req.body;
+
+    // validation of user details
+    // noob way
+    // if (fullName === '') {
+    //     throw new apiError(400, 'fullName is required');
+    // }
+
+    // advance way
+    if (
+        [fullName, username, email, password].some((field) => {
+            return field.trim() === '';
+        })
+    ) {
+        throw new apiError(400, 'All fields are required');
+    }
+
+    if (!validateEmail(email)) {
+        throw new apiError(400, 'Enter a valid email');
+    }
+    if (validatePassword(password) !== '') {
+        throw new apiError(400, validatePassword(password));
+    }
+
+    // check if user already exists: email, username
+    const existedUser = User.findOne({ $or: [{ email }, { username }] });
+
+    if (existedUser) {
+        throw new apiError(409, 'User with username or email already exists');
+    }
+
+    // check for coverImage(optional) and avatar
+    const avatarLocalPath = req.files?.avatar[0]?.path;
+    const coverImageLocalPath = req.files?.coverImage[0]?.path;
+
+    if (!avatarLocalPath) {
+        throw new apiError(400, 'Avatar file is required');
+    }
+
+    // upload them to cloudinary
+    const avatarResponse = await uploadOnCloudinary(avatarLocalPath);
+    const coverImageResponse = await uploadOnCloudinary(coverImageLocalPath);
+
+    if (!avatarResponse) {
+        throw new apiError(400, 'Avatar file is required');
+    }
+
+    // create user object - save the user in db
+    const user = await User.create({
+        username: username,
+        email: email,
+        fullName: fullName,
+        avatar: avatarResponse.url,
+        coverImage: coverImageResponse?.url || '',
+        password: password,
     });
+
+    // remove password and refresh token field from response
+    const createdUser = await User.findById(user._id).select(
+        '-password -refreshToken'
+    );
+
+    // check for user creation
+    if (!createdUser) {
+        throw new apiError(
+            500,
+            'Something went wrong while registering the user'
+        );
+    }
+
+    // return response
+    return res
+        .status(201)
+        .json(
+            new apiResponse(200, createdUser, 'User registered successfully')
+        );
 });
 
 export { registerUser };
