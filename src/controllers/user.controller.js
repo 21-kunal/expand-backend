@@ -3,6 +3,7 @@ import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { User } from '../models/user.model.js';
 import uploadOnCloudinary from '../utils/cloudinary.js';
+import jwt from 'jsonwebtoken';
 
 const generateAccessAndRefreshToken = async (userId) => {
     try {
@@ -182,8 +183,10 @@ const loginUser = asyncHandler(async (req, res) => {
         throw new apiError(404, 'User does not exists.');
     }
 
+    //console.log(user.isPasswordCorrect);
     // after finding the user verify password
-    const isPasswordCorrect = await user.methods.isPasswordCorrect(password);
+    const isPasswordCorrect = await user.isPasswordCorrect(password);
+
     if (!isPasswordCorrect) {
         throw new apiError(401, 'Password is incorrect');
     }
@@ -231,4 +234,44 @@ const logoutUser = asyncHandler(async (req, res) => {
         .json(new apiResponse(200, {}, 'User logged out'));
 });
 
-export { registerUser, loginUser, logoutUser };
+const refreshAccessToken = asyncHandler(async (req, res) => {
+    const incomingRefreshToken =
+        req.cookie.refreshToken || req.body.refreshToken;
+
+    if (!incomingRefreshToken) {
+        throw new apiError(401, 'unauthorized request');
+    }
+
+    const decodedToken = jwt.verify(
+        incomingRefreshToken,
+        process.env.REFRESH_TOKEN_SECRET
+    );
+
+    const user = await User.findById(decodedToken?._id);
+
+    if (!user) {
+        throw new apiError(401, 'Invalid refresh token');
+    }
+
+    if (incomingRefreshToken !== user?.refreshToken) {
+        throw new apiError(401, 'Refresh Token is expired or used');
+    }
+
+    const options = { httpOnly: true, secure: true };
+    const { newAccessToken, newRefreshToken } =
+        await generateAccessAndRefreshToken(user._id);
+
+    return res
+        .status(200)
+        .cookie('accessToken', newAccessToken, options)
+        .cookie('refreshToken', newRefreshToken, options)
+        .json(
+            new apiResponse(
+                200,
+                { accessToken: newAccessToken, refreshToken: newRefreshToken },
+                'Access Token and Refresh Token is created successfully'
+            )
+        );
+});
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken };
