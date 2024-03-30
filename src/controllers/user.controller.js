@@ -2,7 +2,10 @@ import { apiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { User } from '../models/user.model.js';
-import uploadOnCloudinary from '../utils/cloudinary.js';
+import {
+    uploadOnCloudinary,
+    deleteFileOnCloudinary,
+} from '../utils/cloudinary.js';
 import jwt from 'jsonwebtoken';
 
 const generateAccessAndRefreshToken = async (userId) => {
@@ -295,7 +298,9 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
     return res
         .status(200)
-        .json(200, req.user, 'Current User Fetched Successfully');
+        .json(
+            new apiResponse(200, req.user, 'Current User Fetched Successfully')
+        );
 });
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
@@ -333,13 +338,13 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
         throw new apiError(500, 'Error while uploading avatar');
     }
 
-    const user = await User.findByIdAndUpdate(
-        req.user?._id,
-        {
-            $set: { avatar: avatar.url },
-        },
-        { new: true }
-    ).select('-password');
+    const user = await User.findById(req.user?._id);
+    const oldAvatarURL = user.avatar;
+
+    user.avatar = avatar.url;
+    await user.save({ validateBeforeSave: false });
+
+    await deleteFileOnCloudinary(oldAvatarURL);
 
     return res
         .status(200)
@@ -359,13 +364,18 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
         throw new apiError(500, 'Error while uploading Cover Image');
     }
 
-    const user = await User.findByIdAndUpdate(
-        req.user?._id,
-        {
-            $set: { avatar: coverImage.url },
-        },
-        { new: true }
-    ).select('-password');
+    const user = await User.findById(req.user?._id).select(
+        '-password -refreshToken'
+    );
+    // console.log(user);
+    const oldCoverImageURL = user.coverImage;
+
+    user.coverImage = coverImage.url;
+    await user.save({ validateBeforeSave: false });
+
+    if (oldCoverImageURL !== '') {
+        await deleteFileOnCloudinary(oldCoverImageURL);
+    }
 
     return res
         .status(200)
