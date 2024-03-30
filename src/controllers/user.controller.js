@@ -380,7 +380,7 @@ export {
     logoutUser,
     refreshAccessToken,
     changeCurrentPassword,
-    createdUser,
+    getCurrentUser,
     updateAccountDetails,
     updateUserAvatar,
     updateUserCoverImage,
